@@ -1,19 +1,27 @@
-from pydoc import visiblename
-from django.shortcuts import redirect, render
-from .models import Post, Photo
-from django.http import JsonResponse, HttpResponse
-from .forms import PostForm
-from profiles.models import Profile
-from .utils import action_permission
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q
+from django.http import JsonResponse
+from django.shortcuts import redirect, render
+from django.views import View
+from django.views.decorators.http import require_GET, require_POST
 
-@login_required
-def post_list_and_create(request):
-    form = PostForm(request.POST or None)
+from profiles.models import Profile
+from .forms import PostForm
+from .models import Photo, Post
+from .utils import action_permission
 
-    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        if form.is_valid():
+
+class PostListAndCreateView(LoginRequiredMixin, View):
+    """Render the main post board on GET and create a post on AJAX POST."""
+
+    def get(self, request):
+        form = PostForm()
+        return render(request, 'posts/main.html', {'form': form})
+
+    def post(self, request):
+        form = PostForm(request.POST)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' and form.is_valid():
             author = Profile.objects.get(user=request.user)
             instance = form.save(commit=False)
             instance.author = author
@@ -24,12 +32,14 @@ def post_list_and_create(request):
                 'author': instance.author.user.username,
                 'id': instance.id,
             })
-    context = {
-        'form': form,
-    }
-    return render(request, 'posts/main.html', context)
+        return render(request, 'posts/main.html', {'form': form})
+
+
+post_list_and_create = PostListAndCreateView.as_view()
+
 
 @login_required
+@require_GET
 def post_detail(request, pk):
     obj = Post.objects.get(pk=pk)
     form = PostForm()
@@ -40,7 +50,9 @@ def post_detail(request, pk):
     }
     return render(request, 'posts/detail.html', context)
 
+
 @login_required
+@require_GET
 def load_post_data_view(request, num_posts):
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
 
@@ -64,7 +76,9 @@ def load_post_data_view(request, num_posts):
             data.append(item)
         return JsonResponse({'data': data[lower:upper], 'size': size})
 
+
 @login_required
+@require_GET
 def post_detail_data_view(request, pk):
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         obj = Post.objects.get(pk=pk)
@@ -82,7 +96,9 @@ def post_detail_data_view(request, pk):
         return JsonResponse({'data': data})
     return redirect('posts:main-board')
 
+
 @login_required
+@require_POST
 def like_unlike_post(request):
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         pk = request.POST.get('pk')
@@ -95,8 +111,10 @@ def like_unlike_post(request):
             obj.liked.add(request.user)
         return JsonResponse({'liked': liked, 'count': obj.like_count})
     return redirect('posts:main-board')
- 
+
+
 @login_required
+@require_POST
 def like_unlike_post_via_url(request, pk):
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         obj = Post.objects.get(pk=pk)
@@ -145,6 +163,7 @@ def image_upload_view(request):
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
 @login_required
+@require_GET
 def search_posts(request):
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         query = request.GET.get('q', '').strip()
