@@ -1,0 +1,7 @@
+[run]
+relative_files = True
+source = dj_ajax/src
+omit =
+    */migrations/*
+    */tests.py
+    dj_ajax/src/manage.py
