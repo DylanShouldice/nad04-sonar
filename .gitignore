@@ -8,6 +8,7 @@ __pycache__/
 .coverage
 coverage.xml
 htmlcov/
+lcov.info
 
 # Local database & environment secrets
 db.sqlite3

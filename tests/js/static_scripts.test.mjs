@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const ROOT_DIR = path.resolve(import.meta.dirname, "../..");
@@ -42,7 +43,7 @@ test("handleAlerts renders success and danger alert markup into alertBox", () =>
 
   const alertBox = { innerHTML: "" };
   const context = vm.createContext({ alertBox });
-  new vm.Script(code, { filename: "static/functions.js" }).runInContext(
+  new vm.Script(code, { filename: pathToFileURL(functionsPath).href }).runInContext(
     context,
   );
 
@@ -139,8 +140,14 @@ function loadDetailScript(rawPostId) {
   const ajaxCalls = [];
   const dropzoneConfigs = [];
   function MockDropzone(selector, config) {
-    dropzoneConfigs.push({ selector, config });
-    this.on = () => {};
+    const handlers = {};
+    this.on = (event, fn) => {
+      handlers[event] = fn;
+    };
+    if (typeof config?.init === "function") {
+      config.init.call(this);
+    }
+    dropzoneConfigs.push({ selector, config, handlers });
   }
   MockDropzone.autoDiscover = true;
 
@@ -172,8 +179,8 @@ function loadDetailScript(rawPostId) {
     handleAlerts() {},
   });
 
-  new vm.Script(`"use strict";\n${code}`, {
-    filename: "posts/static/posts/detail.js",
+  new vm.Script(code, {
+    filename: pathToFileURL(detailPath).href,
   }).runInContext(context);
 
   return { code, context, elements, ajaxCalls, dropzoneConfigs };
@@ -195,6 +202,10 @@ test("detail.js sanitizes avatar URLs and constructs relative same-origin URLs f
   );
   assert.equal(
     context.sanitizeMediaUrl("/media/avatar.png"),
+    "/media/avatar.png",
+  );
+  assert.equal(
+    context.sanitizeMediaUrl("/media/"),
     "/media/avatar.png",
   );
   assert.equal(
@@ -220,6 +231,7 @@ test("detail.js sanitizes avatar URLs and constructs relative same-origin URLs f
   assert.equal(ajaxCalls.length, 1);
   assert.equal(ajaxCalls[0].type, "GET");
   assert.equal(ajaxCalls[0].url, "/42/data/");
+  ajaxCalls[0].error(new Error("transient error"));
 
   // Render response with unsafe avatar URL -> sanitized to /media/avatar.png
   ajaxCalls[0].success({
@@ -240,40 +252,64 @@ test("detail.js sanitizes avatar URLs and constructs relative same-origin URLs f
   assert.equal(imgsAfterUnsafe.length, 1);
   assert.equal(imgsAfterUnsafe[0].src, "/media/avatar.png");
 
-  // Render response with valid avatar URL -> preserved
+  // Render response with different author, valid avatar URL, and liked: true
   ajaxCalls[0].success({
     data: {
       id: 42,
       title: "Post Title",
       body: "Post Body",
       author: "alice",
-      logged_in: "alice",
+      logged_in: "bob",
       author_avatar: "/media/avatars/user.png",
-      liked: false,
-      count: 0,
+      liked: true,
+      count: 1,
     },
   });
   const imgsAfterValid = findElementsByTag(extraBox, "IMG");
   assert.equal(imgsAfterValid[1].src, "/media/avatars/user.png");
 
-  // Like button posts to relative /42/like-unlike/
+  // Like button posts to relative /42/like-unlike/ and updates or rolls back UI
   const likeButtons = findElementsByTag(extraBox, "BUTTON");
   likeButtons[0].listeners.click();
   assert.equal(ajaxCalls[1].type, "POST");
   assert.equal(ajaxCalls[1].url, "/42/like-unlike/");
+  ajaxCalls[1].success({ count: 1 });
+  ajaxCalls[1].error(new Error("like failed"));
+
+  likeButtons[1].listeners.click();
+  assert.equal(ajaxCalls[2].url, "/42/like-unlike/");
 
   // Update and delete forms post to relative /42/update/ and /42/delete/
   elements.get("update-form").listeners.submit({ preventDefault() {} });
-  assert.equal(ajaxCalls[2].type, "POST");
-  assert.equal(ajaxCalls[2].url, "/42/update/");
+  assert.equal(ajaxCalls[3].type, "POST");
+  assert.equal(ajaxCalls[3].url, "/42/update/");
+  ajaxCalls[3].success({ title: "Updated", body: "Updated body" });
+  ajaxCalls[3].error(new Error("update failed"));
 
   elements.get("delete-form").listeners.submit({ preventDefault() {} });
-  assert.equal(ajaxCalls[3].type, "POST");
-  assert.equal(ajaxCalls[3].url, "/42/delete/");
+  assert.equal(ajaxCalls[4].type, "POST");
+  assert.equal(ajaxCalls[4].url, "/42/delete/");
+  ajaxCalls[4].success({ msg: "Post Deleted" });
+  ajaxCalls[4].error(new Error("delete failed"));
 
-  // Dropzone uses relative /upload/
+  // Dropzone uses relative /upload/ and attaches validated post_id
   assert.equal(dropzoneConfigs.length, 1);
   assert.equal(dropzoneConfigs[0].config.url, "/upload/");
+  const dzFormData = new Map();
+  dropzoneConfigs[0].handlers.sending(null, null, {
+    append: (k, v) => dzFormData.set(k, v),
+  });
+  assert.equal(dzFormData.get("post_id"), "42");
+  dropzoneConfigs[0].handlers.success(null, { message: "ok" });
+  dropzoneConfigs[0].handlers.error(null, "err");
+
+  // Dropzone sending skips appending when post ID becomes invalid
+  elements.get("update-post-id").value = "bad-id";
+  const emptyFormData = new Map();
+  dropzoneConfigs[0].handlers.sending(null, null, {
+    append: (k, v) => emptyFormData.set(k, v),
+  });
+  assert.equal(emptyFormData.size, 0);
 });
 
 test("detail.js safely skips AJAX calls when #update-post-id is missing or invalid", () => {
@@ -358,10 +394,11 @@ test("main.js explicitly declares newPostId and runs cleanly in strict mode", ()
   });
 
   assert.doesNotThrow(() => {
-    new vm.Script(`"use strict";\n${code}`, {
-      filename: "posts/static/posts/main.js",
-    }).runInContext(context);
+    new vm.Script(`"use strict";\n${code}`);
   });
+  new vm.Script(code, {
+    filename: pathToFileURL(mainPath).href,
+  }).runInContext(context);
 
   // Trigger post creation and Dropzone sending to verify shared newPostId state
   elements.get("post-form").listeners.submit({ preventDefault() {} });
