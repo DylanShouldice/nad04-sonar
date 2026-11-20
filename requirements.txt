@@ -1,0 +1,7 @@
+asgiref==3.13.0
+coverage==7.17.3
+crispy-bootstrap5==2026.9
+Django==5.2.19
+django-crispy-forms==2.7
+pillow==13.0.0
+sqlparse==0.6.1
