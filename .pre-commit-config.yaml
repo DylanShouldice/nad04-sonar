@@ -1,0 +1,40 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: check-ast
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.6
+    hooks:
+      - id: ruff-check
+        args: ["--select=E9,F63,F7,F82"]
+        exclude: "/migrations/"
+
+  - repo: local
+    hooks:
+      - id: js-syntax-check
+        name: JavaScript syntax check (node --check)
+        entry: bash -c 'for f in "$@"; do node --check "$f" || exit 1; done' --
+        language: system
+        files: \.(js|mjs)$
+
+      - id: js-tests
+        name: JavaScript unit tests (node --test)
+        entry: node --test tests/js/static_scripts.test.mjs
+        language: system
+        pass_filenames: false
+        files: \.(js|mjs)$
+
+      - id: django-check
+        name: Django system check
+        entry: bash -c 'if [ -x .venv/bin/python ]; then .venv/bin/python dj_ajax/src/manage.py check; else python3 dj_ajax/src/manage.py check; fi'
+        language: system
+        pass_filenames: false
+        files: \.py$
