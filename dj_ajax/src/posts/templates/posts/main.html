@@ -32,7 +32,8 @@ posts
                     <form action="upload/" id= "my-dropzone" class="dropzone dz not-visible">
                         {% csrf_token %}
                         <div class="fallback">
-                            <input name="file" type="file" multiple />
+                            <label for="dropzone-file-input" class="visually-hidden">Upload post images</label>
+                            <input id="dropzone-file-input" name="file" type="file" multiple />
                         </div>
                     </form> 
                 </div>
@@ -41,6 +42,7 @@ posts
     </div>
 
     <div class="mb-3 d-flex">
+        <label for="search-input" class="visually-hidden">Search posts</label>
         <input type="text" id="search-input" class="form-control me-2" placeholder="Search posts...">
         <button id="search-btn" class="btn btn-primary">Search</button>
     </div>

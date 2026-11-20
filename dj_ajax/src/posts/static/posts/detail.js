@@ -2,6 +2,44 @@
 
 console.log("hello world DETAIL.js")
 
+const DEFAULT_AVATAR_URL = '/media/avatar.png';
+
+function sanitizeMediaUrl(candidateUrl) {
+    if (typeof candidateUrl !== 'string' || !candidateUrl.startsWith('/media/')) {
+        return DEFAULT_AVATAR_URL;
+    }
+
+    const relativePath = candidateUrl.slice('/media/'.length);
+    if (!relativePath) {
+        return DEFAULT_AVATAR_URL;
+    }
+
+    const segments = relativePath.split('/');
+    const hasOnlySafeSegments = segments.every(
+        (segment) =>
+            segment.length > 0 &&
+            segment !== '.' &&
+            segment !== '..' &&
+            /^[A-Za-z0-9_.-]+$/.test(segment)
+    );
+
+    if (!hasOnlySafeSegments) {
+        return DEFAULT_AVATAR_URL;
+    }
+
+    return '/media/' + segments.map((segment) => encodeURIComponent(segment)).join('/');
+}
+
+function getValidatedPostId() {
+    const rawPostId = document.getElementById('update-post-id')?.value;
+    if (typeof rawPostId !== 'string' || !/^\d+$/.test(rawPostId)) {
+        return null;
+    }
+
+    const parsedId = Number.parseInt(rawPostId, 10);
+    return Number.isSafeInteger(parsedId) && parsedId > 0 ? parsedId : null;
+}
+
 const postBox = document.getElementById('post-box')
 const extraBox = document.getElementById('extra-box')
 const alertBox = document.getElementById('alert-box')
@@ -10,9 +48,10 @@ const backBtn = document.getElementById('back-btn')
 const updateBtn = document.getElementById('update-btn')
 const deleteBtn = document.getElementById('delete-btn')
 
-const url = window.location.href + "data/"
-const updateUrl = window.location.href + "update/"
-const deleteUrl = window.location.href + "delete/"
+const postId = getValidatedPostId();
+const url = postId !== null ? `/${postId}/data/` : null;
+const updateUrl = postId !== null ? `/${postId}/update/` : null;
+const deleteUrl = postId !== null ? `/${postId}/delete/` : null;
 
 const updateForm = document.getElementById('update-form')
 const deleteForm = document.getElementById('delete-form')
@@ -25,6 +64,7 @@ const bodyInput = document.getElementById('id_body')
 const csrf = document.getElementsByName('csrfmiddlewaretoken')
 
 // Added alot to this AJAX call, I think it is alot for what I got done but it works so I am happy with it
+if (url !== null) {
 $.ajax({
     type: 'GET',
     url: url,
@@ -50,7 +90,7 @@ $.ajax({
         authorInfo.setAttribute('class', 'd-flex align-items-center');
 
         const avatarImg = document.createElement('img');
-        avatarImg.setAttribute('src', data.author_avatar);
+        avatarImg.src = sanitizeMediaUrl(data.author_avatar);
         avatarImg.setAttribute('class', 'rounded-circle me-2');
         avatarImg.setAttribute('width', '50');
         avatarImg.setAttribute('height', '50');
@@ -82,6 +122,9 @@ $.ajax({
         likeButton.appendChild(likeCount);
 
         likeButton.addEventListener('click', () => {
+            if (postId === null) {
+                return;
+            }
             const isLiked = thumbIcon.classList.contains('bi-hand-thumbs-up-fill');
         
             thumbIcon.classList.toggle('bi-hand-thumbs-up');
@@ -90,9 +133,9 @@ $.ajax({
         
             $.ajax({
                 type: 'POST',
-                url: `${window.location.origin}/${data.id}/like-unlike/`, 
+                url: `/${postId}/like-unlike/`,
                 data: {
-                    'csrfmiddlewaretoken': csrf[0].value,
+                    'csrfmiddlewaretoken': csrf[0]?.value ?? '',
                 },
                 success: function (response) {
                     console.log('Like updated successfully:', response);
@@ -140,13 +183,18 @@ $.ajax({
         console.log(error);
     }
 });
+}
 
 
 
 
 
+if (updateForm) {
 updateForm.addEventListener('submit', e => {
     e.preventDefault()
+    if (updateUrl === null) {
+        return;
+    }
 
     const title = document.getElementById('title')
     const body = document.getElementById('body')
@@ -155,7 +203,7 @@ updateForm.addEventListener('submit', e => {
         type: 'POST',
         url: updateUrl,
         data: {
-            'csrfmiddlewaretoken': csrf[0].value,
+            'csrfmiddlewaretoken': csrf[0]?.value ?? '',
             'title': titleInput.value,
             'body': bodyInput.value,
         },
@@ -170,16 +218,22 @@ updateForm.addEventListener('submit', e => {
         }
     })
 })
+}
 
+if (deleteForm) {
 deleteForm.addEventListener('submit', e => {
     e.preventDefault()
+    if (deleteUrl === null) {
+        return;
+    }
+    const csrfToken = csrf[0]?.value ?? '';
     console.log('Delete URL:', deleteUrl);
-    console.log('CSRF Token:', csrf[0].value);
+    console.log('CSRF Token:', csrfToken);
     $.ajax({
         type: 'POST',
         url: deleteUrl,
         data: {
-            'csrfmiddlewaretoken': csrf[0].value,
+            'csrfmiddlewaretoken': csrfToken,
         },
         success: function (response) {
             console.log(response)
@@ -191,15 +245,20 @@ deleteForm.addEventListener('submit', e => {
         }
     })
 })
+}
 
 Dropzone.autoDiscover = false;
 
 const updateDropzone = new Dropzone('#update-dropzone', {
-    url: `${window.location.origin}/upload/`, // Adjust the URL to match your backend
+    url: '/upload/', // Adjust the URL to match your backend
     init: function () {
         this.on('sending', function (file, xhr, formData) {
-            formData.append('csrfmiddlewaretoken', csrf[0].value);
-            formData.append('post_id', document.getElementById('update-post-id').value);
+            const currentPostId = getValidatedPostId();
+            if (currentPostId === null) {
+                return;
+            }
+            formData.append('csrfmiddlewaretoken', csrf[0]?.value ?? '');
+            formData.append('post_id', String(currentPostId));
         });
         this.on('success', function (file, response) {
             console.log('File uploaded successfully:', response);

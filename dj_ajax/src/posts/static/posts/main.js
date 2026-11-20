@@ -78,6 +78,7 @@ const likeUnlikePosts = () => {
 }
 
 let visible = 3
+let newPostId = null;
 
 const getData = () => {
     $.ajax({
