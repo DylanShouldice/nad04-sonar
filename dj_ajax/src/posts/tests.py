@@ -241,7 +241,7 @@ class PostViewsTests(TestCase):
         upload_url = reverse('posts:image-upload')
 
         get_res = self.client.get(upload_url)
-        self.assertEqual(get_res.status_code, 400)
+        self.assertEqual(get_res.status_code, 405)
 
         with tempfile.TemporaryDirectory() as media_dir:
             with override_settings(MEDIA_ROOT=media_dir):
@@ -255,6 +255,65 @@ class PostViewsTests(TestCase):
                     {'message': 'Image uploaded successfully!'},
                 )
                 self.assertEqual(Photo.objects.filter(post=self.post).count(), 1)
+
+    def test_image_upload_rejects_non_author_idor(self):
+        self.client.force_login(self.other_user)
+        upload_url = reverse('posts:image-upload')
+
+        with tempfile.TemporaryDirectory() as media_dir:
+            with override_settings(MEDIA_ROOT=media_dir):
+                res = self.client.post(
+                    upload_url,
+                    data={'post_id': self.post.pk, 'file': make_test_image()},
+                )
+                self.assertEqual(res.status_code, 403)
+                self.assertEqual(Photo.objects.filter(post=self.post).count(), 0)
+
+    def test_image_upload_missing_file_or_unknown_post(self):
+        self.client.force_login(self.author_user)
+        upload_url = reverse('posts:image-upload')
+
+        missing_file = self.client.post(upload_url, data={'post_id': self.post.pk})
+        self.assertEqual(missing_file.status_code, 400)
+
+        with tempfile.TemporaryDirectory() as media_dir:
+            with override_settings(MEDIA_ROOT=media_dir):
+                unknown_post = self.client.post(
+                    upload_url,
+                    data={'post_id': 99999, 'file': make_test_image()},
+                )
+                self.assertEqual(unknown_post.status_code, 404)
+
+    def test_unauthenticated_update_and_delete_redirect_to_login(self):
+        update_res = self.client.post(
+            reverse('posts:post-update', kwargs={'pk': self.post.pk}),
+            data={'title': 'Anon', 'body': 'Body'},
+        )
+        self.assertEqual(update_res.status_code, 302)
+        self.assertIn(settings.LOGIN_URL, update_res.url)
+
+        delete_res = self.client.post(
+            reverse('posts:post-delete', kwargs={'pk': self.post.pk}),
+        )
+        self.assertEqual(delete_res.status_code, 302)
+        self.assertIn(settings.LOGIN_URL, delete_res.url)
+
+    def test_update_and_delete_disallow_get_with_405(self):
+        self.client.force_login(self.author_user)
+        update_get = self.client.get(reverse('posts:post-update', kwargs={'pk': self.post.pk}))
+        delete_get = self.client.get(reverse('posts:post-delete', kwargs={'pk': self.post.pk}))
+        self.assertEqual(update_get.status_code, 405)
+        self.assertEqual(delete_get.status_code, 405)
+
+    def test_non_ajax_update_post_redirects_safely(self):
+        self.client.force_login(self.author_user)
+        res = self.client.post(
+            reverse('posts:post-update', kwargs={'pk': self.post.pk}),
+            data={'title': 'Non-AJAX', 'body': 'Ignored'},
+        )
+        self.assertEqual(res.status_code, 302)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.title, 'First Post')
 
     def test_search_posts_view(self):
         self.client.force_login(self.author_user)

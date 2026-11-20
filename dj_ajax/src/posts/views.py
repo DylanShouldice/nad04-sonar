@@ -127,8 +127,9 @@ def like_unlike_post_via_url(request, pk):
         return JsonResponse({'liked': liked, 'count': obj.liked.count()})
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
-@action_permission
 @login_required
+@require_POST
+@action_permission
 def update_post(request, pk):
     obj = Post.objects.get(pk=pk)
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -137,14 +138,16 @@ def update_post(request, pk):
         obj.title = new_title
         obj.body = new_body
         obj.save()
-    return JsonResponse({
-        'title': new_title,
-        'body': new_body,
-    })
+        return JsonResponse({
+            'title': new_title,
+            'body': new_body,
+        })
+    return redirect('posts:main-board')
 
 
-@action_permission
 @login_required
+@require_POST
+@action_permission
 def delete_post(request, pk):
     obj = Post.objects.get(pk=pk)
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -152,15 +155,26 @@ def delete_post(request, pk):
         return JsonResponse({'msg': 'Post Deleted'})
     return redirect('posts:main-board')
 
+
 @login_required
+@require_POST
 def image_upload_view(request):
-    if request.method == 'POST':
-        img = request.FILES.get('file')
-        post_id = request.POST.get('post_id')
+    img = request.FILES.get('file')
+    post_id = request.POST.get('post_id') or request.POST.get('new_post_id')
+    if not img or not post_id:
+        return JsonResponse({'error': 'Invalid upload request.'}, status=400)
+
+    try:
         post = Post.objects.get(id=post_id)
-        Photo.objects.create(image=img, post=post)
-        return JsonResponse({'message': 'Image uploaded successfully!'})
-    return JsonResponse({'error': 'Invalid request'}, status=400)
+    except (Post.DoesNotExist, ValueError, TypeError):
+        return JsonResponse({'error': 'Post not found.'}, status=404)
+
+    profile = Profile.objects.get(user=request.user)
+    if post.author != profile:
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+
+    Photo.objects.create(image=img, post=post)
+    return JsonResponse({'message': 'Image uploaded successfully!'})
 
 @login_required
 @require_GET
